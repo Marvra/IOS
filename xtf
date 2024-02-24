@@ -1,0 +1,139 @@
+#!/bin/sh                   
+
+export POSIXLY_CORRECT=yes  # needed from assigment
+export LC_ALL=C             # needed for correct sorting, you will thank me later :feelsokayman:
+
+print_help()
+{
+    echo "Usage: xtf [OPTION]... [FILE]..."
+    echo "Search for a pattern in a file using a regular expression."
+    echo " "
+}
+
+COMMAND="list"
+COMMAND_SET=0
+LOG_FILE=""
+AFTER_DATE=""
+BEFORE_DATE=""
+CURRENCY=""
+USERNAME="" ## uloz meno zakaznika neviem ci moze byt viacej budes to ukladat pri *) asi?
+FILTERED=""
+
+
+while [ $# -gt 0 ]; do
+  case $1 in
+    -h|--help)
+        print_help
+        exit 0
+        ;;
+    -a)
+        AFTER_DATE="$2" 
+        ## daj tu potom ifko ktore bude kontorolovat ci je aktualny after date vacsi/ mensi nez $1 date ktory 
+        ## ti pride podla toho ulozis do AFTER DATE co treba 
+        ## alebo sa na to radsej vyjeb gg 
+        shift
+        shift
+        ;;
+    -b)
+        BEFORE_DATE="$2" 
+        ## daj tu potom ifko ktore bude kontorolovat ci je aktualny before date vacsi/ mensi nez $1 date ktory 
+        ## ti pride podla toho ulozis do BEFORE DATE co treba 
+        ## alebo sa na to radsej vyjeb gg 
+        shift
+        shift
+        ;;
+    -c)
+        CURRENCY="$2"
+        shift
+        shift
+        ;;
+    list|list-currency|status|profit)
+        COMMAND="$1"
+        COMMAND_SET=$((COMMAND_SET + 1))
+        shift
+        ;;
+    *.log)
+        LOG_FILE="${LOG_FILE}$(cat $1)\n"
+        # LOG_FILE=$(printf "%s" "$LOG_FILE" "$(cat "$1" | sed 's/^[ \t]*//')")
+        # "${LOG_FILE}$(<"$1")"
+        # echo "LOG_FILE: $LOG_FILE"
+        shift
+        ;;
+    *.log.gz)
+        LOG_FILE="${LOG_FILE}$(gzip -d -c "$1")\n"
+        # echo "LOG_FILE: $LOG_FILE"
+        shift
+        ;;
+    *)
+        USERNAME="$1"
+        shift
+        ;;
+  esac
+done
+
+if [ "$COMMAND_SET" -gt 1  ]; then
+  exit 1
+fi
+
+LOG_FILE=$(echo "$LOG_FILE" | sed 's/\n$//') # remove last newline
+
+
+if [ -n "$USERNAME" ] && [ -n "$FILTERED" ]; then
+  FILTERED=$(echo "$FILTERED" | awk -F';' -v username="$USERNAME" '$1 == username {print}')
+elif [ -n "$USERNAME" ]; then
+  FILTERED=$(echo "$LOG_FILE" | awk -F';' -v username="$USERNAME" '$1 == username {print}') 
+fi
+
+
+if [ -n "$AFTER_DATE" ] && [ -n "$FILTERED" ]; then
+  FILTERED=$(echo "$FILTERED" | awk -F';' -v after_date="$AFTER_DATE" '$2 > after_date {print}')
+elif [ -n "$AFTER_DATE" ]; then
+  FILTERED=$(echo "$LOG_FILE" | awk -F';' -v after_date="$AFTER_DATE" '$2 > after_date {print}') 
+fi
+
+if [ -n "$BEFORE_DATE" ] && [ -n "$FILTERED" ]; then
+  FILTERED=$(echo "$FILTERED" | awk -F';' -v before_date="$BEFORE_DATE" '$2 < before_date {print}')
+elif [ -n "$BEFORE_DATE" ]; then
+  FILTERED=$(echo "$LOG_FILE" | awk -F';' -v before_date="$BEFORE_DATE" '$2 < before_date {print}') 
+fi
+
+
+if [ -n "$CURRENCY" ] && [ -n "$FILTERED" ]; then 
+# FILTERED=$(echo "$FILTERED" | awk -v currency="$CURRENCY" -F';' '$3 == currency && !seen[$3]++ {print}')
+  FILTERED=$(echo "$FILTERED" | awk -v currency="$CURRENCY" -F';' '$3 == currency {print}')
+elif [ -n "$CURRENCY" ]; then 
+  FILTERED=$(echo "$LOG_FILE" | awk -v currency="$CURRENCY" -F';' '$3 == currency {print}')
+fi
+
+if [ -n "$COMMAND" ]; then  # Check if the command variable is not empty
+  if [ "$COMMAND" = "list" ]; then # Check if the command is "list"
+    FILTERED=$(echo "$FILTERED" | awk -F';' '{print}')
+  elif [ "$COMMAND" = "list-currency" ]; then # Check if the command is "list-currency"
+    FILTERED=$(echo "$FILTERED" | awk -F';' '!seen[$3]++ {print $3}' | sort)
+  elif [ "$COMMAND" = "status" ]; then
+    FILTERED=$(echo "$FILTERED" | awk -F';' '{sum[$3]+=$4} END {for (curr in sum) printf "%s : %.4f\n", curr, sum[curr]}'| sort)
+  elif [ "$COMMAND" = "profit" ]; then
+    FILTERED=$(echo "$FILTERED" | awk -F';' -v profit="$XTF_PROFIT" '{
+    sum[$3] += $4
+}
+END {
+    for (curr in sum) {
+        if (sum[curr] > 0) {
+            if (profit == 0) {
+                printf "%s : %.4f\n", curr, sum[curr] + sum[curr] * 0.2
+            } else {
+                printf "%s : %.4f\n", curr, sum[curr] + sum[curr] * (0.01 * profit)
+            }
+        } else {
+            printf "%s : %.4f\n", curr, sum[curr]
+        }
+    }
+}' | sort)
+  fi
+fi
+
+if echo "$FILTERED" | grep -q " : 0.0000"; then
+  exit 0
+fi
+
+echo "$FILTERED"
