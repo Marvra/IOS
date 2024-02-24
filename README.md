@@ -1,5 +1,19 @@
 # IOS
 VUT FIT 2023/24  IOS
-chmod -x ./xtf
 
-For usage of script use -h/--help
+  ```sh
+  chmod -x ./xtf
+  ```
+
+For info on how to use script :
+
+  ```sh
+  xtf --help
+  ```
+
+or
+
+
+  ```sh
+  xtf -h
+  ```
