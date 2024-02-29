@@ -1,7 +1,6 @@
 #!/bin/sh                   
-
-export POSIXLY_CORRECT=yes  # needed from assigment
-export LC_ALL=C             # needed for correct sorting, you will thank me later :feelsokayman:
+export POSIXLY_CORRECT=yes 
+export LC_ALL=C
 
 print_help()
 {
@@ -16,8 +15,9 @@ LOG_FILE=""
 AFTER_DATE=""
 BEFORE_DATE=""
 CURRENCY=""
-USERNAME="" ## uloz meno zakaznika neviem ci moze byt viacej budes to ukladat pri *) asi?
+USERNAME=""
 FILTERED=""
+: "${XTF_PROFIT:=20}"
 
 
 while [ $# -gt 0 ]; do
@@ -27,18 +27,28 @@ while [ $# -gt 0 ]; do
         exit 0
         ;;
     -a)
-        AFTER_DATE="$2" 
-        ## daj tu potom ifko ktore bude kontorolovat ci je aktualny after date vacsi/ mensi nez $1 date ktory 
-        ## ti pride podla toho ulozis do AFTER DATE co treba 
-        ## alebo sa na to radsej vyjeb gg 
+        if ! date -d "$2" +"%Y-%m-%d %H:%M:%S" >/dev/null 2>&1; then
+          # echo "Invalid date format. Please provide the date in the format: YYYY-MM-DD HH:MM:SS"
+          exit 1
+        fi
+        if [ -n "$AFTER_DATE" ]; then
+          # echo "Date already set."
+          exit 1
+        fi
+        AFTER_DATE=$(date -d "$2" +"%Y-%m-%d %H:%M:%S")
         shift
         shift
         ;;
     -b)
+        if ! date -d "$2" +"%Y-%m-%d %H:%M:%S" >/dev/null 2>&1; then
+          # echo "Invalid date format. Please provide the date in the format: YYYY-MM-DD HH:MM:SS"
+          exit 1
+        fi
+        if [ -n "$BEFORE_DATE" ]; then
+          # echo "Date already set."
+          exit 1
+        fi
         BEFORE_DATE="$2" 
-        ## daj tu potom ifko ktore bude kontorolovat ci je aktualny before date vacsi/ mensi nez $1 date ktory 
-        ## ti pride podla toho ulozis do BEFORE DATE co treba 
-        ## alebo sa na to radsej vyjeb gg 
         shift
         shift
         ;;
@@ -50,28 +60,36 @@ while [ $# -gt 0 ]; do
     list|list-currency|status|profit)
         COMMAND="$1"
         COMMAND_SET=$((COMMAND_SET + 1))
+        if [ "$COMMAND_SET" -ne 1 ]; then
+          # echo "Command already set."
+          exit 1
+        fi
         shift
         ;;
-    *.log)
-        LOG_FILE="${LOG_FILE}$(cat $1)\n"
-        # LOG_FILE=$(printf "%s" "$LOG_FILE" "$(cat "$1" | sed 's/^[ \t]*//')")
-        # "${LOG_FILE}$(<"$1")"
-        # echo "LOG_FILE: $LOG_FILE"
-        shift
-        ;;
-    *.log.gz)
+    # *.log)
+    #     LOG_FILE="${LOG_FILE}$(cat "$1")\n"
+    #     # LOG_FILE=$(printf "%s" "$LOG_FILE" "$(cat "$1" | sed 's/^[ \t]*//')")
+    #     # "${LOG_FILE}$(<"$1")"
+    #     # echo "LOG_FILE: $LOG_FILE"
+    #     shift
+    #     ;;
+    *.gz)
         LOG_FILE="${LOG_FILE}$(gzip -d -c "$1")\n"
         # echo "LOG_FILE: $LOG_FILE"
         shift
         ;;
     *)
-        USERNAME="$1"
+        if [ -n "$USERNAME" ]; then
+          LOG_FILE="${LOG_FILE}$(cat "$1")\n"
+        else
+          USERNAME="$1"
+        fi
         shift
         ;;
   esac
 done
 
-if [ "$COMMAND_SET" -gt 1  ]; then
+if [ "$COMMAND_SET" -gt 1 ]; then
   exit 1
 fi
 
@@ -105,10 +123,10 @@ elif [ -n "$CURRENCY" ]; then
   FILTERED=$(echo "$LOG_FILE" | awk -v currency="$CURRENCY" -F';' '$3 == currency {print}')
 fi
 
-if [ -n "$COMMAND" ]; then  # Check if the command variable is not empty
-  if [ "$COMMAND" = "list" ]; then # Check if the command is "list"
+if [ -n "$COMMAND" ]; then 
+  if [ "$COMMAND" = "list" ]; then
     FILTERED=$(echo "$FILTERED" | awk -F';' '{print}')
-  elif [ "$COMMAND" = "list-currency" ]; then # Check if the command is "list-currency"
+  elif [ "$COMMAND" = "list-currency" ]; then
     FILTERED=$(echo "$FILTERED" | awk -F';' '!seen[$3]++ {print $3}' | sort)
   elif [ "$COMMAND" = "status" ]; then
     FILTERED=$(echo "$FILTERED" | awk -F';' '{sum[$3]+=$4} END {for (curr in sum) printf "%s : %.4f\n", curr, sum[curr]}'| sort)
@@ -119,9 +137,9 @@ if [ -n "$COMMAND" ]; then  # Check if the command variable is not empty
 END {
     for (curr in sum) {
         if (sum[curr] > 0) {
-            if (profit == 0) {
+            if (profit < 0) {
                 printf "%s : %.4f\n", curr, sum[curr] + sum[curr] * 0.2
-            } else {
+            } else if (profit >= 0){
                 printf "%s : %.4f\n", curr, sum[curr] + sum[curr] * (0.01 * profit)
             }
         } else {
@@ -136,4 +154,4 @@ if echo "$FILTERED" | grep -q " : 0.0000"; then
   exit 0
 fi
 
-echo "$FILTERED"
+echo "$FILTERED" 
