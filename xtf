@@ -4,9 +4,16 @@ export LC_ALL=C
 
 print_help()
 {
-    echo "Usage: xtf [OPTION]... [FILE]..."
-    echo "Search for a pattern in a file using a regular expression."
-    echo " "
+    echo "xtf [-h|--help] [FILTR] [PŘÍKAZ] UŽIVATEL LOG [LOG2 [...]."
+    echo "FILTR : list|list-currency|status|profit "
+    echo "PŘÍKAZ : -c | -a | -b"
+    echo "UŽIVATEL : meno uzivatela"
+    echo "LOG: poskytnuty subor, moze tiez koncit na .gz"
+    echo "-c: typ meny pozostavajuci z 3 pismen. Vypise riadky s danou menou."
+    echo "-a: po datume vo formate %Y-%m-%d %H:%M:%S. Vypise riadky po danom datume."
+    echo "-b: pred datumom vo formate %Y-%m-%d %H:%M:%S. Vypise riadky pred danym datumom."
+
+
 }
 
 COMMAND="list"
@@ -19,7 +26,7 @@ USERNAME=""
 FILTERED=""
 : "${XTF_PROFIT:=20}"
 
-
+# prech=adzanie argumentov
 while [ $# -gt 0 ]; do
   case $1 in
     -h|--help)
@@ -27,60 +34,85 @@ while [ $# -gt 0 ]; do
         exit 0
         ;;
     -a)
+      #zistujeme ci je $2 argument v spravnom formate ak nie vypisujem chybu a chybova hlaska je vypisana na stderr
+      #chybovu hlasku ktoru dodava date zahadzujem
         if ! date -d "$2" +"%Y-%m-%d %H:%M:%S" >/dev/null 2>&1; then
-          # echo "Invalid date format. Please provide the date in the format: YYYY-MM-DD HH:MM:SS"
+          echo "Incorect date format" >&2
           exit 1
         fi
         if [ -n "$AFTER_DATE" ]; then
-          # echo "Date already set."
+          echo "Date already set." >&2
           exit 1
         fi
-        AFTER_DATE=$(date -d "$2" +"%Y-%m-%d %H:%M:%S")
+        AFTER_DATE="$2"
+
+        # preskakujem 2 argumenty
         shift
         shift
         ;;
     -b)
+      #zistujeme ci je $2 argument v spravnom formate ak nie vypisujem chybu a chybova hlaska je vypisana na stderr
+      #chybovu hlasku ktoru dodava date zahadzujem
         if ! date -d "$2" +"%Y-%m-%d %H:%M:%S" >/dev/null 2>&1; then
-          # echo "Invalid date format. Please provide the date in the format: YYYY-MM-DD HH:MM:SS"
+          echo "Incorect date format" >&2
           exit 1
         fi
         if [ -n "$BEFORE_DATE" ]; then
-          # echo "Date already set."
+          echo "Date already set." >&2
           exit 1
         fi
         BEFORE_DATE="$2" 
+
+        # preskakujem 2 argumenty
         shift
         shift
         ;;
     -c)
-        CURRENCY="$2"
+        if [ -n "$CURRENCY" ]; then
+          echo "Currency already set." >&2
+          exit 1
+        fi
+
+        #pozeram ci je $2 argument v spravnom formate (3 za sebou iduce pismena)
+        case $2 in
+            [A-Za-z][A-Za-z][A-Za-z])
+              CURRENCY="$2"
+              ;;
+            *)
+              echo "Invalid currency argument." >&2
+              exit 1
+              ;;
+        esac
+
         shift
         shift
         ;;
     list|list-currency|status|profit)
         COMMAND="$1"
+
+        #ukladam pocet predanych prikazov ak je vacsi nez 1 dochadza k chybe
         COMMAND_SET=$((COMMAND_SET + 1))
         if [ "$COMMAND_SET" -ne 1 ]; then
-          # echo "Command already set."
+          echo "Command already set." >&2
           exit 1
         fi
         shift
         ;;
-    # *.log)
-    #     LOG_FILE="${LOG_FILE}$(cat "$1")\n"
-    #     # LOG_FILE=$(printf "%s" "$LOG_FILE" "$(cat "$1" | sed 's/^[ \t]*//')")
-    #     # "${LOG_FILE}$(<"$1")"
-    #     # echo "LOG_FILE: $LOG_FILE"
-    #     shift
-    #     ;;
     *.gz)
+        #dekompresia suboru konciaceho na .gz a ukladanie do premennej log_file
         LOG_FILE="${LOG_FILE}$(gzip -d -c "$1")\n"
-        # echo "LOG_FILE: $LOG_FILE"
         shift
         ;;
     *)
         if [ -n "$USERNAME" ]; then
-          LOG_FILE="${LOG_FILE}$(cat "$1")\n"
+          #citam zadany subor a ukladam do log_file
+          #ak pride k chybe s citanim zo suboru nastane chybovu hlasku cat zahadzujem a vypisujem vlastnu chybovu hlasku na stderr
+          if contents=$(cat "$1") >/dev/null 2>&1; then
+            LOG_FILE="${LOG_FILE}${contents}\n"
+          else
+            echo "Failed to read file." >&2
+            exit 1
+          fi
         else
           USERNAME="$1"
         fi
@@ -89,50 +121,60 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-if [ "$COMMAND_SET" -gt 1 ]; then
+
+#log_file je prazdny nebol nacitany subor
+if [ -z "$LOG_FILE" ]; then
+  echo "No file provided." >&2
   exit 1
 fi
 
-LOG_FILE=$(echo "$LOG_FILE" | sed 's/\n$//') # remove last newline
+#zbavujem sa posldneho \n ktory bol mnou pridany pocas prechadzania argumentov
+LOG_FILE=$(echo "$LOG_FILE" | sed 's/\n$//')
 
+#kontrolujem ci neni nejaky stlpec v log subore prazdny ak je nastav chyba a chybova hlaska je vypisana na stderr
+empty_column=$(echo "$LOG_FILE" | awk -F ';' '{if ($1 == "" || $2 == "" || $3 == "" || $4 == "") {print "1"; exit 1}}')
 
-if [ -n "$USERNAME" ] && [ -n "$FILTERED" ]; then
-  FILTERED=$(echo "$FILTERED" | awk -F';' -v username="$USERNAME" '$1 == username {print}')
-elif [ -n "$USERNAME" ]; then
-  FILTERED=$(echo "$LOG_FILE" | awk -F';' -v username="$USERNAME" '$1 == username {print}') 
+if [ -n "$empty_column" ]; then 
+  echo "Empty column found in log" >&2
+  exit 1
 fi
 
 
-if [ -n "$AFTER_DATE" ] && [ -n "$FILTERED" ]; then
+#meno uzivatela je vzdy zadane filtrujem riadky v ktorom je zadane meno uzivatela rovnake s $1<-(stlpec v ktorom su mena uzivatelov)
+#ukladam do filtered (riadky su oddelene ;)
+FILTERED=$(echo "$LOG_FILE" | awk -F';' -v username="$USERNAME" '$1 == username {print}')
+
+
+#kontrolujem ci bol -a  argument zadany (ak nie after_date by bolo prazdne) ak ano ukladam riadky po danom datume  $2<-(stlpec v ktorom su datumy)
+if [ -n "$AFTER_DATE" ]; then
   FILTERED=$(echo "$FILTERED" | awk -F';' -v after_date="$AFTER_DATE" '$2 > after_date {print}')
-elif [ -n "$AFTER_DATE" ]; then
-  FILTERED=$(echo "$LOG_FILE" | awk -F';' -v after_date="$AFTER_DATE" '$2 > after_date {print}') 
 fi
 
-if [ -n "$BEFORE_DATE" ] && [ -n "$FILTERED" ]; then
+#kontrolujem ci bol -b argument zadany (ak nie before_date by bolo prazdne)  ak ano ukladam riadky pred danym datumom  $2<-(stlpec v ktorom su datumy)
+if [ -n "$BEFORE_DATE" ]; then
   FILTERED=$(echo "$FILTERED" | awk -F';' -v before_date="$BEFORE_DATE" '$2 < before_date {print}')
-elif [ -n "$BEFORE_DATE" ]; then
-  FILTERED=$(echo "$LOG_FILE" | awk -F';' -v before_date="$BEFORE_DATE" '$2 < before_date {print}') 
 fi
 
-
-if [ -n "$CURRENCY" ] && [ -n "$FILTERED" ]; then 
-# FILTERED=$(echo "$FILTERED" | awk -v currency="$CURRENCY" -F';' '$3 == currency && !seen[$3]++ {print}')
+#kontrolujem ci bol -c argument zadany (ak nie currency by bolo prazdne) ak ano ukladam riadky rovnake s $2<-(stlpec v ktorom su meny)
+if [ -n "$CURRENCY" ]; then 
   FILTERED=$(echo "$FILTERED" | awk -v currency="$CURRENCY" -F';' '$3 == currency {print}')
-elif [ -n "$CURRENCY" ]; then 
-  FILTERED=$(echo "$LOG_FILE" | awk -v currency="$CURRENCY" -F';' '$3 == currency {print}')
 fi
 
-if [ -n "$COMMAND" ]; then 
-  if [ "$COMMAND" = "list" ]; then
-    FILTERED=$(echo "$FILTERED" | awk -F';' '{print}')
-  elif [ "$COMMAND" = "list-currency" ]; then
-    FILTERED=$(echo "$FILTERED" | awk -F';' '!seen[$3]++ {print $3}' | sort)
-  elif [ "$COMMAND" = "status" ]; then
-    FILTERED=$(echo "$FILTERED" | awk -F';' '{sum[$3]+=$4} END {for (curr in sum) printf "%s : %.4f\n", curr, sum[curr]}'| sort)
-  elif [ "$COMMAND" = "profit" ]; then
-    FILTERED=$(echo "$FILTERED" | awk -F';' -v profit="$XTF_PROFIT" '{
-    sum[$3] += $4
+#prechadzanie danych prikazov
+if [ "$COMMAND" = "list" ]; then
+  #vypiseme vsetko
+  FILTERED=$(echo "$FILTERED" | awk -F';' '{print}')
+elif [ "$COMMAND" = "list-currency" ]; then
+  #pre kazdu videnu menu sa priratava hodnota v poli seen
+  #vypisuju sa ak mena este nebola videna (dana mena ma hodnotu 0)
+  FILTERED=$(echo "$FILTERED" | awk -F';' '!seen[$3]++ {print $3}' | sort)
+elif [ "$COMMAND" = "status" ]; then
+  #zratavaju sa meny potom sa pre kazdu danu menu v poli sum vypise celkove mnozstvo
+  FILTERED=$(echo "$FILTERED" | awk -F';' '{sum[$3]+=$4} END {for (curr in sum) printf "%s : %.4f\n", curr, sum[curr]}'| sort)
+elif [ "$COMMAND" = "profit" ]; then
+  #zratavaju sa meny potom sa vypisu dane meny s urcity profitom nakoniec sa zoradia
+  FILTERED=$(echo "$FILTERED" | awk -F';' -v profit="$XTF_PROFIT" '{
+  sum[$3] += $4
 }
 END {
     for (curr in sum) {
@@ -147,9 +189,9 @@ END {
         }
     }
 }' | sort)
-  fi
 fi
 
+# pre vypis bez " : 0.0000" ak bol niekde status (zratavanie meny) nulovy
 if echo "$FILTERED" | grep -q " : 0.0000"; then
   exit 0
 fi
